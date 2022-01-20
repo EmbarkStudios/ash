@@ -1,7 +1,8 @@
 use crate::vk;
 use std::iter::Iterator;
 use std::marker::PhantomData;
-use std::mem::size_of;
+use std::mem::{size_of, align_of};
+use std::mem::MaybeUninit;
 use std::os::raw::c_void;
 use std::{io, slice};
 
@@ -15,42 +16,44 @@ use std::{io, slice};
 #[derive(Debug, Clone)]
 pub struct Align<T> {
     ptr: *mut c_void,
-    elem_size: vk::DeviceSize,
-    size: vk::DeviceSize,
+    elem_size: usize,
+    size: usize,
     _m: PhantomData<T>,
 }
 
-#[derive(Debug)]
-pub struct AlignIter<'a, T: 'a> {
-    align: &'a mut Align<T>,
-    current: vk::DeviceSize,
-}
-
 impl<T: Copy> Align<T> {
-    pub fn copy_from_slice(&mut self, slice: &[T]) {
-        use std::slice::from_raw_parts_mut;
-        if self.elem_size == size_of::<T>() as u64 {
-            unsafe {
-                let mapped_slice = from_raw_parts_mut(self.ptr as *mut T, slice.len());
-                mapped_slice.copy_from_slice(slice);
-            }
+    /// # Safety
+    /// - `self.ptr` *must* be valid and point to a section of memory >= `self.size`.
+    pub unsafe fn copy_from_slice(&mut self, slice: &[T]) {
+        if self.elem_size == size_of::<T>() {
+            core::ptr::copy_nonoverlapping(slice.as_ptr(), self.ptr as *mut T, slice.len().min(self.size / self.elem_size));
         } else {
             for (i, val) in self.iter_mut().enumerate().take(slice.len()) {
-                *val = slice[i];
+                val.write(slice[i]);
             }
         }
     }
 }
 
-fn calc_padding(adr: vk::DeviceSize, align: vk::DeviceSize) -> vk::DeviceSize {
+fn calc_padding(adr: usize, align: usize) -> usize {
     (align - adr % align) % align
 }
 
 impl<T> Align<T> {
-    pub unsafe fn new(ptr: *mut c_void, alignment: vk::DeviceSize, size: vk::DeviceSize) -> Self {
-        let padding = calc_padding(size_of::<T>() as vk::DeviceSize, alignment);
-        let elem_size = size_of::<T>() as vk::DeviceSize + padding;
+    /// - `ptr` must be non-null and point to a valid section of memory >= `size`.
+    /// - `size` must be <= `isize::MAX`
+    /// - `alignment` must be <= `size`
+    /// - `size` must be aligned to `alignment`
+    /// - `alignment` must be greater or equal to `align_of::<T>()`
+    pub fn new(ptr: *mut c_void, alignment: vk::DeviceSize, size: vk::DeviceSize) -> Self {
+        assert!(size <= isize::MAX as vk::DeviceSize, "size > isize::MAX");
+        assert!(alignment <= size, "alignment must be <= size");
+        let alignment = alignment as usize;
+        let size = size as usize;
+        let padding = calc_padding(size_of::<T>(), alignment);
+        let elem_size = size_of::<T>() + padding;
         assert!(calc_padding(size, alignment) == 0, "size must be aligned");
+        assert!(alignment >= align_of::<T>(), "alignment must be greater or equal to align of T");
         Self {
             ptr,
             elem_size,
@@ -59,7 +62,9 @@ impl<T> Align<T> {
         }
     }
 
-    pub fn iter_mut(&mut self) -> AlignIter<T> {
+    /// # Safety
+    /// - `self.ptr` *must* be valid and point to a section of memory >= `self.size` until the iterator is dropped.
+    pub unsafe fn iter_mut(&mut self) -> AlignIter<T> {
         AlignIter {
             current: 0,
             align: self,
@@ -67,18 +72,25 @@ impl<T> Align<T> {
     }
 }
 
-impl<'a, T: Copy + 'a> Iterator for AlignIter<'a, T> {
-    type Item = &'a mut T;
+#[derive(Debug)]
+pub struct AlignIter<'a, T: 'a> {
+    align: &'a mut Align<T>,
+    current: usize,
+}
+
+impl<'a, T: 'a> Iterator for AlignIter<'a, T> {
+    type Item = &'a mut MaybeUninit<T>;
     fn next(&mut self) -> Option<Self::Item> {
         if self.current == self.align.size {
             return None;
         }
-        unsafe {
-            // Need to cast to *mut u8 because () has size 0
-            let ptr = (self.align.ptr as *mut u8).offset(self.current as isize) as *mut T;
-            self.current += self.align.elem_size;
-            Some(&mut *ptr)
-        }
+        // SAFETY: `align.size` is guaranteed to be <= isize::MAX and the above garantees `self.current` stays <= align.size.
+        let ptr = unsafe { (self.align.ptr as *mut u8).add(self.current) } as *mut T;
+        self.current += self.align.elem_size;
+        // SAFETY: MaybeUninit has same layout as T, and in order to obtain an `AlignIter` we guarantee that `ptr` is still valid
+        // until it is dropped.
+        let maybe_uninit: &'a mut MaybeUninit<T> = unsafe { core::mem::transmute(ptr) };
+        Some(maybe_uninit)
     }
 }
 
