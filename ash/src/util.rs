@@ -42,12 +42,11 @@ fn calc_padding(adr: usize, align: usize) -> usize {
 impl<T> Align<T> {
     /// - `ptr` must be non-null and point to a valid section of memory >= `size`.
     /// - `size` must be <= `isize::MAX`
-    /// - `alignment` must be <= `size`
     /// - `size` must be aligned to `alignment`
     /// - `alignment` must be greater or equal to `align_of::<T>()`
+    /// - `alignment` must be within usize range
     pub fn new(ptr: *mut c_void, alignment: vk::DeviceSize, size: vk::DeviceSize) -> Self {
         assert!(size <= isize::MAX as vk::DeviceSize, "size > isize::MAX");
-        assert!(alignment <= size, "alignment must be <= size");
         let alignment = alignment as usize;
         let size = size as usize;
         let padding = calc_padding(size_of::<T>(), alignment);
