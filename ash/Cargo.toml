@@ -1,16 +1,16 @@
 [package]
 name = "ash"
-version = "0.37.0+1.3.269"
+version = "0.38.0+1.3.269"
 authors = [
     "Maik Klein <maikklein@googlemail.com>",
     "Benjamin Saunders <ben.e.saunders@gmail.com>",
-    "Marijn Suijten <marijn@traverseresearch.nl>",
+    "Marijn Suijten <marijn@traverseresearch.nl>"
 ]
 description = "Vulkan bindings for Rust"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/MaikKlein/ash"
 readme = "../README.md"
-keywords = ["vulkan", "graphic"]
+keywords = [ "vulkan", "graphic" ]
 documentation = "https://docs.rs/ash"
 edition = "2021"
 rust-version = "1.60.0"
@@ -19,17 +19,17 @@ rust-version = "1.60.0"
 libloading = { version = "0.7", optional = true }
 
 [features]
-default = ["loaded", "debug"]
+default = [ "loaded", "debug" ]
 # Link the Vulkan loader at compile time.
-linked = []
+linked = [  ]
 # Support searching for the Vulkan loader manually at runtime.
-loaded = ["libloading"]
+loaded = [ "libloading" ]
 # Whether Vulkan structs should implement Debug.
-debug = []
+debug = [  ]
 
 [package.metadata.release]
 no-dev-version = true
 
 [package.metadata.docs.rs]
 all-features = true
-rustdoc-args = ["--cfg", "docsrs"]
+rustdoc-args = [ "--cfg", "docsrs" ]
